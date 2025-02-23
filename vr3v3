@@ -1,0 +1,2167 @@
+#define MAX_BUTTONS 10        // Максимален брой бутони за лотове
+#define MAX_POSITION_OBJECTS 50 // Максимален брой обекти за позиции
+#define CLEANUP_INTERVAL 60000  // Интервал за почистване в ms
+
+
+
+//+------------------------------------------------------------------+
+//| Дефиниции на константи                                            |
+//+------------------------------------------------------------------+
+#define CHARTEVENT_OBJECT_DRAG_END 71
+#define VK_LEFT          0x25
+#define VK_RIGHT         0x27
+#define ERR_OBJECT_EXISTS 4200
+
+//--- Други дефиниции, които може да са необходими
+// Глобални променливи за управление на бутоните
+bool g_positionButtonsVisible = false;
+int g_lastPositionsCount = 0;
+//--- Глобални променливи за drag & drop
+bool g_isDragging = false;
+string g_draggedObject = "";
+int g_dragStartX = 0;
+int g_dragStartY = 0;
+string g_activeButton = ""; // Съхранява името на активния бутон
+
+//+------------------------------------------------------------------+
+//|                                                    VR-STEALS-3.mq5 |
+//|                        Copyright 2025, RexiBG                      |
+//|                        Modified: 2025-02-22 14:27:27              |
+//+------------------------------------------------------------------+
+#property copyright   "Copyright 2025, RexiBG"
+#property link       "https://www.mql5.com"
+#property version    "3.3"
+#property description "Virtual StopLoss, TakeProfit, Breakeven, Trailing stop"
+#property strict
+
+#include <Trade\Trade.mqh>
+
+#define MAX_RETRIES 3        // Максимален брой опити за операции
+#define RETRY_DELAY 100      // Закъснение между опитите в ms
+#define CHUNK_SIZE 1000      // Размер на chunk за обработка на данни
+
+// Create trade object
+CTrade trade;
+
+// Input parameters
+input double InpStartLots=0.01;    // Starting lot size
+input int    InpTakeProfit=100;    // Take Profit (points)
+input int    InpStopLoss=100;      // Stop Loss (points)
+input int    InpTrailingStop=300;  // Trailing Stop (points)
+input int    InpBreakeven=300;     // Breakeven (points)
+input int    InpStopLimit=250;     // Stop Limit distance (points)
+input int    InpMagicNumber=0;     // Magic Number
+input int    InpSlippage=20;       // Maximum slippage
+
+// Essential global variables
+
+int    g_buttonWidth=17;
+int    g_buttonHeight=15;
+double g_takeProfit=0;
+double g_stopLoss=0;
+double g_trailingStop=0;
+double g_breakeven=0;
+double g_lotSize=0;
+double g_currentLot=0;
+
+// Memory management variables
+bool   g_resourcesInitialized=false;
+int    g_lastError=0;
+uint   g_lastCleanup=0;
+
+//+------------------------------------------------------------------+
+//| Memory cleanup function                                           |
+//+------------------------------------------------------------------+
+void FreeResources()
+{
+    for(int attempt=0; attempt < MAX_RETRIES; attempt++)
+    {
+        ObjectsDeleteAll(0, g_prefix);
+        if(GetLastError() == 0) break;
+        Sleep(RETRY_DELAY);
+    }
+    
+    ResetLastError();
+    g_resourcesInitialized = false;
+}
+
+//+------------------------------------------------------------------+
+//| Lot size normalization                                            |
+//+------------------------------------------------------------------+
+double NormalizeLotSize(double lots)
+{
+    if(lots <= 0) return SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    
+    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+    double stepLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    
+    if(stepLot <= 0) return minLot;
+    
+    lots = MathFloor(lots/stepLot) * stepLot;
+    lots = NormalizeDouble(lots, 2);
+    
+    return MathMax(minLot, MathMin(lots, maxLot));
+}
+
+
+
+
+//+------------------------------------------------------------------+
+//| Expert Chart event function                                        |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| ChartEvent function                                                |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| ChartEvent function                                                |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| ChartEvent function                                                |
+//+------------------------------------------------------------------+
+
+
+
+//+------------------------------------------------------------------+
+//| Преместване на група бутони                                       |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Преместване на група бутони                                       |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Преместване на свързаните бутони                                  |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Преместване на група бутони                                        |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+
+
+
+//+------------------------------------------------------------------+
+//| Trading Functions                                                 |
+//+------------------------------------------------------------------+
+bool OpenPosition(string symbol, ENUM_ORDER_TYPE orderType, double volume, 
+                 double price=0, double sl=0, double tp=0, string comment="")
+{
+    if(symbol=="") symbol=_Symbol;
+    
+    volume = NormalizeLotSize(volume);
+    if(volume <= 0) return false;
+    
+    if(comment=="") 
+        comment = StringFormat("VR-STEALS-3 Magic:%d", InpMagicNumber);
+
+    price = NormalizeDouble(price, _Digits);
+    sl = NormalizeDouble(sl, _Digits);
+    tp = NormalizeDouble(tp, _Digits);
+
+    bool result = false;
+    
+    switch(orderType)
+    {
+        case ORDER_TYPE_BUY:
+            result = trade.Buy(volume, symbol, 0, sl, tp, comment);
+            break;
+            
+        case ORDER_TYPE_SELL:
+            result = trade.Sell(volume, symbol, 0, sl, tp, comment);
+            break;
+            
+        case ORDER_TYPE_BUY_LIMIT:
+            if(price <= 0) return false;
+            result = trade.BuyLimit(volume, price, symbol, sl, tp, 
+                                  ORDER_TIME_GTC, 0, comment);
+            break;
+            
+        case ORDER_TYPE_SELL_LIMIT:
+            if(price <= 0) return false;
+            result = trade.SellLimit(volume, price, symbol, sl, tp, 
+                                   ORDER_TIME_GTC, 0, comment);
+            break;
+            
+        case ORDER_TYPE_BUY_STOP:
+            if(price <= 0) return false;
+            result = trade.BuyStop(volume, price, symbol, sl, tp, 
+                                 ORDER_TIME_GTC, 0, comment);
+            break;
+            
+        case ORDER_TYPE_SELL_STOP:
+            if(price <= 0) return false;
+            result = trade.SellStop(volume, price, symbol, sl, tp, 
+                                  ORDER_TIME_GTC, 0, comment);
+            break;
+    }
+    
+    if(!result)
+        Print("Error opening position: ", GetLastError());
+        
+    return result;
+}
+//+------------------------------------------------------------------+
+//| Position Management Functions                                      |
+//+------------------------------------------------------------------+
+void ManagePositions()
+{
+    static datetime lastUpdate = 0;
+    datetime currentTime = TimeCurrent();
+    
+    // Обновяваме позициите само на всеки 250ms
+    if(currentTime == lastUpdate) return;
+    
+    // Изчистваме стари контроли за позиции
+    ObjectsDeleteAll(0, g_prefix+"Ctrl");
+    ObjectsDeleteAll(0, g_prefix+"SL");
+    ObjectsDeleteAll(0, g_prefix+"TP");
+    ObjectsDeleteAll(0, g_prefix+"BE");
+    ObjectsDeleteAll(0, g_prefix+"TR");
+    ObjectsDeleteAll(0, g_prefix+"CL");
+    
+    for(int i = PositionsTotal()-1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket <= 0) continue;
+        
+        if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber && 
+           InpMagicNumber != 0) continue;
+           
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+        datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+        double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+        double currentPrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        
+        CreatePositionControls(ticket, 20, 20 + i * 30);
+        HandlePositionButtons(ticket, posType, openPrice, currentPrice);
+    }
+    
+    ChartRedraw(0);
+    lastUpdate = currentTime;
+}
+void CreatePositionControls(ulong ticket, int x, int y)
+{
+    string base = IntegerToString(ticket);
+    
+    // Изчисляваме позициите с по-голямо отстояние
+    int startX = 120;  // Преместваме бутоните по-надясно
+    int startY = 30 + (int)(ticket % 50) * 30;  // Увеличаваме вертикалното разстояние
+    
+    // Създаваме бутоните с по-големи размери
+    if(CreateButton("Ctrl"+base, startX, startY, 30, 20, "< >", 8, true))
+    {
+        // Ако основният бутон е създаден успешно, създаваме останалите
+        CreateButton("SL"+base, startX+35, startY, 25, 20, "SL", 8);
+        CreateButton("TP"+base, startX+65, startY, 25, 20, "TP", 8);
+        CreateButton("BE"+base, startX+95, startY, 25, 20, "BE", 8);
+        CreateButton("TR"+base, startX+125, startY, 25, 20, "TR", 8);
+        CreateButton("CL"+base, startX+155, startY, 25, 20, "X", 8);
+        
+        Print("Created all controls for ticket: ", ticket);
+    }
+}
+
+void HandlePositionButtons(ulong ticket, ENUM_POSITION_TYPE posType, 
+                         double openPrice, double currentPrice)
+{
+    string base = IntegerToString(ticket);
+    
+    if(ObjectGetInteger(0, g_prefix+"SL"+base, OBJPROP_STATE))
+    {
+        double slPrice = (posType == POSITION_TYPE_BUY) ? 
+                        currentPrice - g_stopLoss : currentPrice + g_stopLoss;
+        ModifyPosition(ticket, slPrice, 0);
+        SetButtonState("SL"+base, false);
+    }
+    
+    if(ObjectGetInteger(0, g_prefix+"TP"+base, OBJPROP_STATE))
+    {
+        double tpPrice = (posType == POSITION_TYPE_BUY) ? 
+                        currentPrice + g_takeProfit : currentPrice - g_takeProfit;
+        ModifyPosition(ticket, 0, tpPrice);
+        SetButtonState("TP"+base, false);
+    }
+    
+    if(ObjectGetInteger(0, g_prefix+"BE"+base, OBJPROP_STATE))
+    {
+        if((posType == POSITION_TYPE_BUY && currentPrice >= openPrice + g_breakeven) ||
+           (posType == POSITION_TYPE_SELL && currentPrice <= openPrice - g_breakeven))
+        {
+            ModifyPosition(ticket, openPrice, 0);
+        }
+        SetButtonState("BE"+base, false);
+    }
+    
+    if(ObjectGetInteger(0, g_prefix+"TR"+base, OBJPROP_STATE))
+    {
+        double trailPrice = (posType == POSITION_TYPE_BUY) ? 
+                           currentPrice - g_trailingStop : currentPrice + g_trailingStop;
+        ModifyPosition(ticket, trailPrice, 0);
+        SetButtonState("TR"+base, false);
+    }
+    
+    if(ObjectGetInteger(0, g_prefix+"CL"+base, OBJPROP_STATE))
+    {
+        ClosePosition(ticket);
+        SetButtonState("CL"+base, false);
+    }
+}
+
+bool ModifyPosition(ulong ticket, double sl=0, double tp=0)
+{
+    if(!PositionSelectByTicket(ticket)) return false;
+    return trade.PositionModify(ticket, sl, tp);
+}
+
+bool ClosePosition(ulong ticket)
+{
+    if(!PositionSelectByTicket(ticket)) return false;
+    return trade.PositionClose(ticket);
+}
+
+void HandleLotsPanel()
+{
+    if(ObjectGetInteger(0, g_prefix+"Lots", OBJPROP_STATE))
+    {
+        int x0 = (int)ObjectGetInteger(0, g_prefix+"TradeLine", OBJPROP_XDISTANCE);
+        int y0 = (int)ObjectGetInteger(0, g_prefix+"TradeLine", OBJPROP_YDISTANCE);
+        
+        for(int i=0; i<MAX_BUTTONS; i++)
+        {
+            string lotName = "lot" + IntegerToString(i);
+            CreateButton(lotName, x0+105, y0+15+20*i, 50, 18, 
+                        DoubleToString(g_lotSize*(i+1),2), 8, false);  // Добавени последните два параметъра
+                        
+            if(ObjectGetInteger(0, g_prefix+lotName, OBJPROP_STATE))
+            {
+                g_currentLot = g_lotSize*(i+1);
+                SetButtonState(lotName, false);
+                SetButtonState("Lots", false);
+                ObjectSetString(0, g_prefix+"Lots", OBJPROP_TEXT, 
+                              "LOTS " + DoubleToString(g_currentLot,2));
+            }
+        }
+    }
+    else
+    {
+        for(int i=0; i<=20; i++)
+            ObjectDelete(0, g_prefix+"lot"+IntegerToString(i));
+    }
+}
+void HandleTimeDisplay()
+{
+    if(!ObjectGetInteger(0, g_prefix+"TimeDisplay", OBJPROP_STATE))
+    {
+        ObjectDelete(0, g_prefix+"Clock");
+        return;
+    }
+    
+    string timeStr = TimeToString(TimeCurrent(), TIME_MINUTES|TIME_SECONDS);
+    
+    if(ObjectFind(0, g_prefix+"Clock") < 0)
+        CreateButton("Clock", 5, 195, 90, 16, timeStr, 9);
+    else
+        ObjectSetString(0, g_prefix+"Clock", OBJPROP_TEXT, timeStr);
+}
+//+------------------------------------------------------------------+
+//| Trading Process Functions                                         |
+//+------------------------------------------------------------------+
+void ProcessTrading()
+{
+    if(ObjectGetInteger(0, g_prefix+"Buy", OBJPROP_STATE))
+    {
+        if(OpenPosition(_Symbol, ORDER_TYPE_BUY, g_currentLot))
+            SetButtonState("Buy", false);
+    }
+            
+    if(ObjectGetInteger(0, g_prefix+"Sell", OBJPROP_STATE))
+    {
+        if(OpenPosition(_Symbol, ORDER_TYPE_SELL, g_currentLot))
+            SetButtonState("Sell", false);
+    }
+            
+    double limitDistance = NormalizeDouble(InpStopLimit*_Point, _Digits);
+    
+    if(ObjectGetInteger(0, g_prefix+"BuyLimit", OBJPROP_STATE))
+    {
+        if(OpenPosition(_Symbol, ORDER_TYPE_BUY_LIMIT, g_currentLot, 
+           SymbolInfoDouble(_Symbol, SYMBOL_ASK) - limitDistance))
+            SetButtonState("BuyLimit", false);
+    }
+            
+    if(ObjectGetInteger(0, g_prefix+"SellLimit", OBJPROP_STATE))
+    {
+        if(OpenPosition(_Symbol, ORDER_TYPE_SELL_LIMIT, g_currentLot,
+           SymbolInfoDouble(_Symbol, SYMBOL_BID) + limitDistance))
+            SetButtonState("SellLimit", false);
+    }
+            
+    if(ObjectGetInteger(0, g_prefix+"BuyStop", OBJPROP_STATE))
+    {
+        if(OpenPosition(_Symbol, ORDER_TYPE_BUY_STOP, g_currentLot,
+           SymbolInfoDouble(_Symbol, SYMBOL_ASK) + limitDistance))
+            SetButtonState("BuyStop", false);
+    }
+            
+    if(ObjectGetInteger(0, g_prefix+"SellStop", OBJPROP_STATE))
+    {
+        if(OpenPosition(_Symbol, ORDER_TYPE_SELL_STOP, g_currentLot,
+           SymbolInfoDouble(_Symbol, SYMBOL_BID) - limitDistance))
+            SetButtonState("SellStop", false);
+    }
+    
+    HandleScreenshot();
+}
+
+//+------------------------------------------------------------------+
+//| Helper Functions                                                  |
+//+------------------------------------------------------------------+
+void SetButtonState(string name, bool state)
+{
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_STATE, state);
+}
+
+void HandleScreenshot()
+{
+    if(ObjectGetInteger(0, g_prefix+"Screenshot", OBJPROP_STATE))
+    {
+        string filename = StringFormat("%s_%s_%s.gif", 
+                                     _Symbol,
+                                     TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES), 
+                                     "RexiBG");
+        if(ChartScreenShot(0, filename, 800, 600, ALIGN_RIGHT))
+            Print("Screenshot saved as ", filename);
+        else
+            Print("Screenshot error ", GetLastError());
+            
+        SetButtonState("Screenshot", false);
+    }
+}
+
+void DrawPositionLevels()
+{
+
+static uint lastCleanup = 0;
+uint currentMs = GetTickCount();
+    
+if(currentMs - lastCleanup >= CLEANUP_INTERVAL)
+{
+    ObjectsDeleteAll(0, g_prefix+"Level_");
+    lastCleanup = currentMs;
+}
+
+int totalPositions = PositionsTotal();
+if(totalPositions > MAX_POSITION_OBJECTS)
+    totalPositions = MAX_POSITION_OBJECTS;
+
+    ObjectsDeleteAll(0, g_prefix+"Level_");
+    
+    for(int i = totalPositions-1; i >= 0; i--)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket <= 0) continue;
+        
+        if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber && 
+           InpMagicNumber != 0) continue;
+           
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+        
+        double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+        datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
+        
+        string levelName = g_prefix+"Level_"+IntegerToString(ticket);
+        
+        if(ObjectCreate(0, levelName, OBJ_TREND, 0, openTime, openPrice, 
+                       TimeCurrent(), openPrice))
+        {
+            ObjectSetInteger(0, levelName, OBJPROP_COLOR, clrGray);
+            ObjectSetInteger(0, levelName, OBJPROP_STYLE, STYLE_DOT);
+            ObjectSetInteger(0, levelName, OBJPROP_WIDTH, 1);
+            ObjectSetInteger(0, levelName, OBJPROP_RAY_RIGHT, true);
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Custom Print Function                                             |
+//+------------------------------------------------------------------+
+void Print(string message)
+{
+    // Директно извикване на системния Print
+    ::Print(TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), 
+           " [VR-STEALS-3] ", 
+           message);
+    
+    // Опростено извикване на Comment
+    Comment("\n", message);
+}
+
+
+
+
+
+void UpdatePositionControls()
+{
+    int totalPositions = PositionsTotal();
+    
+    // Създаваме нови бутони за всяка позиция
+    for(int i = 0; i < totalPositions; i++)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket <= 0) continue;
+        
+        if(PositionGetInteger(POSITION_MAGIC) != InpMagicNumber && 
+           InpMagicNumber != 0) continue;
+           
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+        double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        
+        // Изчисляваме Y позицията базирана на цената
+        int yPos = PriceToY(openPrice);
+        
+        // Изчисляваме X позицията
+        int startX = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS) - 200;
+        
+        string base = IntegerToString(ticket);
+        
+        // Създаваме бутоните на нивото на цената
+        CreateButton("Ctrl"+base, startX, yPos-10, 30, 20, "< >", 8, true);
+        CreateButton("SL"+base, startX+35, yPos-10, 25, 20, "SL", 8);
+        CreateButton("TP"+base, startX+65, yPos-10, 25, 20, "TP", 8);
+        CreateButton("BE"+base, startX+95, yPos-10, 25, 20, "BE", 8);
+        CreateButton("TR"+base, startX+125, yPos-10, 25, 20, "TR", 8);
+        CreateButton("CL"+base, startX+155, yPos-10, 25, 20, "X", 8);
+    }
+    
+    g_lastPositionsCount = totalPositions;
+    g_positionButtonsVisible = true;
+    ChartRedraw(0);
+}
+
+//+------------------------------------------------------------------+
+//| Помощни функции за позициониране                                   |
+//+------------------------------------------------------------------+
+int PriceToY(double price)
+{
+    double min = ChartGetDouble(0, CHART_PRICE_MIN);
+    double max = ChartGetDouble(0, CHART_PRICE_MAX);
+    int height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+    
+    if(max == min) return 0;
+    
+    return height - (int)((price - min) * height / (max - min));
+}
+
+double YToPrice(int y)
+{
+    double min = ChartGetDouble(0, CHART_PRICE_MIN);
+    double max = ChartGetDouble(0, CHART_PRICE_MAX);
+    int height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+    
+    if(height == 0) return 0;
+    
+    return max - (y * (max - min) / height);
+}
+
+
+//+------------------------------------------------------------------+
+//| Обработка на клик върху бутон                                      |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Обработка на клик върху бутон                                      |
+//+------------------------------------------------------------------+
+
+
+//+------------------------------------------------------------------+
+//| Помощни функции за търговия                                        |
+//+------------------------------------------------------------------+
+void ExecuteMarketOrder(ENUM_ORDER_TYPE orderType)
+{
+    // Имплементирайте логиката за пазарни поръчки
+    Print("Execute market order: ", EnumToString(orderType));
+}
+
+void OpenBuyLimit()
+{
+    // Имплементирайте логиката за Buy Limit
+    Print("Open Buy Limit");
+}
+
+void OpenSellLimit()
+{
+    // Имплементирайте логиката за Sell Limit
+    Print("Open Sell Limit");
+}
+
+void OpenBuyStop()
+{
+    // Имплементирайте логиката за Buy Stop
+    Print("Open Buy Stop");
+}
+
+void OpenSellStop()
+{
+    // Имплементирайте логиката за Sell Stop
+    Print("Open Sell Stop");
+}
+
+void ModifyStopLoss(ulong ticket)
+{
+    // Имплементирайте логиката за модификация на Stop Loss
+    Print("Modify SL for ticket: ", ticket);
+}
+
+void ModifyTakeProfit(ulong ticket)
+{
+    // Имплементирайте логиката за модификация на Take Profit
+    Print("Modify TP for ticket: ", ticket);
+}
+
+void ModifyBreakEven(ulong ticket)
+{
+    // Имплементирайте логиката за Break Even
+    Print("Set Break Even for ticket: ", ticket);
+}
+
+void ModifyTrailing(ulong ticket)
+{
+    // Имплементирайте логиката за Trailing Stop
+    Print("Set Trailing Stop for ticket: ", ticket);
+}
+
+
+
+void TakeScreenshot()
+{
+    // Имплементирайте логиката за скрийншот
+    Print("Taking screenshot");
+}
+
+//+------------------------------------------------------------------+
+//| Помощна функция за проверка дали символ е цифра                    |
+//+------------------------------------------------------------------+
+bool IsDigit(string str)
+{
+    if(str == "0" || str == "1" || str == "2" || str == "3" || str == "4" ||
+       str == "5" || str == "6" || str == "7" || str == "8" || str == "9")
+        return true;
+    return false;
+}
+
+
+//+------------------------------------------------------------------+
+//| Помощни функции за търговия (само новите)                         |
+//+------------------------------------------------------------------+
+void ModifyStopLoss(ulong ticket, double openPrice)
+{
+    // Имплементирайте логиката за модификация на Stop Loss
+    Print("Modify SL for ticket: ", ticket);
+}
+
+void ModifyTakeProfit(ulong ticket, double openPrice)
+{
+    // Имплементирайте логиката за модификация на Take Profit
+    Print("Modify TP for ticket: ", ticket);
+}
+
+
+
+
+void ClosePositionByTicket(ulong ticket)  // Преименувана функция
+{
+    // Имплементирайте логиката за затваряне на позиция
+    Print("Close position: ", ticket);
+}
+
+
+//+------------------------------------------------------------------+
+//| Функции за работа с ордери                                         |
+//+------------------------------------------------------------------+
+void ModifyOrderStopLoss(ulong ticket, double newSL = 0.0)
+{
+    if(!OrderSelect(ticket)) return;
+    
+    double currentPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+    ENUM_ORDER_TYPE orderType = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+    
+    // Тук добавете вашата логика за модифициране на SL
+    Print("Modifying SL for order: ", ticket);
+}
+
+void ModifyOrderTakeProfit(ulong ticket, double newTP = 0.0)
+{
+    if(!OrderSelect(ticket)) return;
+    
+    double currentPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+    ENUM_ORDER_TYPE orderType = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+    
+    // Тук добавете вашата логика за модифициране на TP
+    Print("Modifying TP for order: ", ticket);
+}
+
+void DeleteOrder(ulong ticket)
+{
+    if(!OrderSelect(ticket)) return;
+    
+    // Тук добавете вашата логика за изтриване на ордера
+    Print("Deleting order: ", ticket);
+}
+
+
+
+
+
+///+------------------------------------------------------------------+
+//| Създаване на бутони за позиция или ордер                          |
+//+------------------------------------------------------------------+
+
+
+
+//+------------------------------------------------------------------+
+//| Структура за съхранение на позициите на бутоните                  |
+//+------------------------------------------------------------------+
+struct ButtonPosition
+{
+    string base;    // POS или ORD + ticket
+    int xPos;       // X позиция
+    int yPos;       // Y позиция
+    bool isActive;  // Дали позицията е активна
+};
+
+//--- Глобални променливи
+ButtonPosition gButtonPositions[];  // Масив за съхранение на позициите
+bool isInitialized = false;
+
+//+------------------------------------------------------------------+
+//| Функция за намиране на индекса на позиция по base                 |
+//+------------------------------------------------------------------+
+int FindButtonPosition(string base)
+{
+    for(int i = 0; i < ArraySize(gButtonPositions); i++)
+    {
+        if(gButtonPositions[i].base == base && gButtonPositions[i].isActive)
+            return i;
+    }
+    return -1;
+}
+
+
+//+------------------------------------------------------------------+
+//| Функция за обновяване на интерфейса                               |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Функция за обновяване на интерфейса                               |
+//+------------------------------------------------------------------+
+void UpdateInterface()
+{
+    // Маркираме всички позиции като неактивни
+    for(int i = 0; i < ArraySize(gButtonPositions); i++)
+    {
+        gButtonPositions[i].isActive = false;
+    }
+
+    // Обработваме отворените позиции
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket <= 0) continue;
+        
+        if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+        
+        double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+        ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+        
+        string base = "POS" + IntegerToString(ticket);
+        int yPos = PriceToY(openPrice); // Използваме PriceToY вместо ChartPriceToY
+        
+        // Проверяваме за съществуваща позиция
+        int index = FindButtonPosition(base);
+        int startX = (index >= 0) ? gButtonPositions[index].xPos : 200;
+        
+        CreatePositionButtons(ticket, "POS", startX, yPos, openPrice, posType);
+    }
+
+    // Обработваме чакащите ордери
+    for(int i = 0; i < OrdersTotal(); i++)
+    {
+        ulong ticket = OrderGetTicket(i);
+        if(ticket <= 0) continue;
+        
+        if(OrderGetString(ORDER_SYMBOL) != _Symbol) continue;
+        
+        double openPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+        ENUM_ORDER_TYPE orderType = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+        
+        string base = "ORD" + IntegerToString(ticket);
+        int yPos = PriceToY(openPrice); // Използваме PriceToY вместо ChartPriceToY
+        
+        // Проверяваме за съществуваща позиция
+        int index = FindButtonPosition(base);
+        int startX = (index >= 0) ? gButtonPositions[index].xPos : 200;
+        
+        CreatePositionButtons(ticket, "ORD", startX, yPos, openPrice, (ENUM_POSITION_TYPE)orderType);
+    }
+
+    // Изчистваме неактивните позиции
+    int i = 0;
+    while(i < ArraySize(gButtonPositions))
+    {
+        if(!gButtonPositions[i].isActive)
+        {
+            ArrayRemove(gButtonPositions, i, 1);
+        }
+        else
+        {
+            i++;
+        }
+    }
+    
+    ChartRedraw(0);
+}
+
+//+------------------------------------------------------------------+
+//| Chart event handler                                                |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                      |
+//+------------------------------------------------------------------+
+
+
+
+
+//+------------------------------------------------------------------+
+//| Запазване на позициите                                            |
+//+------------------------------------------------------------------+
+void SaveButtonPositions()
+{
+    for(int i = 0; i < ArraySize(gButtonPositions); i++)
+    {
+        if(gButtonPositions[i].isActive)
+        {
+            string key = "pos_" + gButtonPositions[i].base;
+            GlobalVariableSet(key + "_x", gButtonPositions[i].xPos);
+            GlobalVariableSet(key + "_y", gButtonPositions[i].yPos);
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Зареждане на запазените позиции                                   |
+//+------------------------------------------------------------------+
+void LoadButtonPositions()
+{
+    string prefix = "pos_";
+    for(int i = 0; i < GlobalVariablesTotal(); i++)
+    {
+        string name = GlobalVariableName(i);
+        if(StringFind(name, prefix) == 0)
+        {
+            string base = StringSubstr(name, StringLen(prefix), 
+                                     StringFind(name, "_x") - StringLen(prefix));
+            if(base != "")
+            {
+                int x = (int)GlobalVariableGet(prefix + base + "_x");
+                int y = (int)GlobalVariableGet(prefix + base + "_y");
+                UpdateButtonPosition(base, x, y, true);
+            }
+        }
+    }
+}
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Създаване на търговското меню                                     |
+//+------------------------------------------------------------------+
+void CreateTradePanel()
+{
+    int startX = 10;
+    int startY = 10;
+    
+    CreateButton("Buy", startX, startY, 70, 20, "Buy", 8);
+    CreateButton("Sell", startX+75, startY, 70, 20, "Sell", 8);
+    CreateButton("CloseLast", startX, startY+25, 70, 20, "Close Last", 8);
+    CreateButton("CloseAll", startX+75, startY+25, 70, 20, "Close All", 8);
+}
+
+
+//+------------------------------------------------------------------+
+//| Chart event handler                                                |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Timer event handler                                                |
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+    static datetime lastUpdate = 0;
+    datetime currentTime = TimeLocal();
+    
+    // Обновяваме интерфейса на всеки 2 секунди
+    if(currentTime - lastUpdate >= 2)
+    {
+        UpdateInterface();
+        lastUpdate = currentTime;
+    }
+}
+
+
+
+
+//+------------------------------------------------------------------+
+//| UpdateButtonPosition function                                      |
+//+------------------------------------------------------------------+
+void UpdateButtonPosition(string base, int x, int y, bool forceUpdate = false)
+{
+    int index = FindButtonPosition(base);
+    if(index == -1)
+    {
+        int size = ArraySize(gButtonPositions);
+        ArrayResize(gButtonPositions, size + 1);
+        gButtonPositions[size].base = base;
+        gButtonPositions[size].xPos = x;
+        gButtonPositions[size].yPos = y;
+        gButtonPositions[size].isActive = true;
+    }
+    else if(forceUpdate)
+    {
+        gButtonPositions[index].xPos = x;
+        gButtonPositions[index].yPos = y;
+        gButtonPositions[index].isActive = true;
+    }
+}
+
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                     |
+//+------------------------------------------------------------------+
+
+
+//+------------------------------------------------------------------+
+//| LoadSavedPositions function                                        |
+//+------------------------------------------------------------------+
+void LoadSavedPositions()
+{
+    ArrayResize(gButtonPositions, 0);
+    
+    string prefix = "pos_";
+    for(int i = 0; i < GlobalVariablesTotal(); i++)
+    {
+        string name = GlobalVariableName(i);
+        if(StringFind(name, prefix) == 0)
+        {
+            string base = StringSubstr(name, StringLen(prefix), 
+                                     StringFind(name, "_x") - StringLen(prefix));
+            if(base != "")
+            {
+                int x = (int)GlobalVariableGet(prefix + base + "_x");
+                int y = (int)GlobalVariableGet(prefix + base + "_y");
+                UpdateButtonPosition(base, x, y, true);
+            }
+        }
+    }
+}
+
+
+
+
+//+------------------------------------------------------------------+
+//| Функция за преместване на бутоните                                |
+//+------------------------------------------------------------------+
+void MovePositionButtons(string base, int newX, int newY)
+{
+    int xOffsets[] = {0, 35, 65, 95, 125, 155, 0};  // Отмествания по X
+    int yOffsets[] = {0, 0, 0, 0, 0, 0, 20};        // Отмествания по Y
+    string suffixes[] = {"Ctrl", "SL", "TP", "BE", "TR", "CL", "Info"};
+    
+    for(int i = 0; i < ArraySize(suffixes); i++)
+    {
+        string objName = g_prefix + suffixes[i] + base;
+        if(ObjectFind(0, objName) >= 0)
+        {
+            ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, newX + xOffsets[i]);
+            ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, newY + yOffsets[i]);
+        }
+    }
+}
+
+
+
+
+
+//+------------------------------------------------------------------+
+//| OnDeinit function                                                  |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+    // Почистваме всички глобални променливи при деинициализация
+    string prefix = "pos_";
+    for(int i = GlobalVariablesTotal()-1; i >= 0; i--)
+    {
+        string name = GlobalVariableName(i);
+        if(StringFind(name, prefix) == 0 || StringFind(name, "init_") == 0)
+        {
+            GlobalVariableDel(name);
+        }
+    }
+}
+
+
+
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                     |
+//+------------------------------------------------------------------+
+
+
+//+------------------------------------------------------------------+
+//| HandleButtonClick function                                         |
+//+------------------------------------------------------------------+
+
+
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                              |
+//+------------------------------------------------------------------+
+
+
+//+------------------------------------------------------------------+
+//| Обновяване на бутоните според активните позиции                   |
+//+------------------------------------------------------------------+
+void UpdateButtons()
+{
+    // Създаваме масив за съхранение на активните позиции
+    ulong activeTickets[];
+    ArrayResize(activeTickets, 0);
+    
+    // Събираме всички активни позиции
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket > 0)
+        {
+            ArrayResize(activeTickets, ArraySize(activeTickets) + 1);
+            activeTickets[ArraySize(activeTickets) - 1] = ticket;
+        }
+    }
+    
+    // Проверяваме всички съществуващи бутони
+    for(int i = ObjectsTotal(0, 0, OBJ_BUTTON) - 1; i >= 0; i--)
+    {
+        string objName = ObjectName(0, i, 0, OBJ_BUTTON);
+        
+        // Проверяваме само нашите бутони
+        if(StringFind(objName, g_prefix) == 0)
+        {
+            // Извличаме ticket номера от името на бутона
+            string ticketStr = "";
+            
+            if(StringFind(objName, "POS") >= 0)
+            {
+                ticketStr = StringSubstr(objName, StringFind(objName, "POS") + 3);
+                ticketStr = StringSubstr(ticketStr, 0, StringFind(ticketStr, g_prefix));
+                if(ticketStr == "") continue;
+                
+                ulong buttonTicket = StringToInteger(ticketStr);
+                bool found = false;
+                
+                // Проверяваме дали позицията все още е активна
+                for(int j = 0; j < ArraySize(activeTickets); j++)
+                {
+                    if(activeTickets[j] == buttonTicket)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                
+                // Ако позицията не е активна, премахваме бутоните за нея
+                if(!found)
+                {
+                    DeletePositionButtons("POS" + ticketStr);
+                    CleanupPositionVariables("POS" + ticketStr);
+                }
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Изтриване на бутоните за дадена позиция                          |
+//+------------------------------------------------------------------+
+void DeletePositionButtons(string base)
+{
+    string suffixes[] = {"Ctrl", "SL", "TP", "BE", "TR", "CL", "Info"};
+    
+    for(int i = 0; i < ArraySize(suffixes); i++)
+    {
+        string objName = g_prefix + suffixes[i] + base;
+        if(ObjectFind(0, objName) >= 0)
+        {
+            ObjectDelete(0, objName);
+        }
+    }
+    
+    ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| Почистване на глобалните променливи за позиция                   |
+//+------------------------------------------------------------------+
+void CleanupPositionVariables(string base)
+{
+    GlobalVariableDel("pos_" + base + "_x");
+    GlobalVariableDel("pos_" + base + "_y");
+    GlobalVariableDel("init_" + base);
+}
+
+
+
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                     |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| HandleButtonClick function                                         |
+//+------------------------------------------------------------------+
+void HandleButtonClick(string clickedButton)
+{
+    // Ако е кликнат бутон X (Close)
+    if(StringFind(clickedButton, g_prefix+"CL") >= 0)
+    {
+        string base = StringSubstr(clickedButton, StringLen(g_prefix+"CL"));
+        ulong ticket = StringToInteger(StringSubstr(base, 3)); // Пропускаме "POS"
+        
+        // Намираме позицията и я затваряме
+        if(PositionSelectByTicket(ticket))
+        {
+            double volume = PositionGetDouble(POSITION_VOLUME);
+            double close_price = PositionGetDouble(POSITION_PRICE_CURRENT);
+            string symbol = PositionGetString(POSITION_SYMBOL);
+            
+            // Опитваме да затворим позицията
+            MqlTradeRequest request = {};
+            MqlTradeResult result = {};
+            
+            request.action = TRADE_ACTION_DEAL;
+            request.position = ticket;
+            request.symbol = symbol;
+            request.volume = volume;
+            request.deviation = 5;
+            request.magic = MagicNumber;  // Използваме входния параметър MagicNumber
+            
+            if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
+            {
+                request.type = ORDER_TYPE_SELL;
+                request.price = SymbolInfoDouble(symbol, SYMBOL_BID);
+            }
+            else
+            {
+                request.type = ORDER_TYPE_BUY;
+                request.price = SymbolInfoDouble(symbol, SYMBOL_ASK);
+            }
+            
+            bool success = OrderSend(request, result);
+            
+            if(success && result.retcode == TRADE_RETCODE_DONE)
+            {
+                Print("Position ", ticket, " closed successfully");
+                // Бутоните ще бъдат премахнати автоматично от UpdateButtons
+            }
+            else
+            {
+                Print("Error closing position ", ticket, 
+                      ", retcode: ", result.retcode,
+                      ", description: ", GetLastError());
+            }
+        }
+        else
+        {
+            Print("Could not select position ", ticket, ", error: ", GetLastError());
+        }
+    }
+}
+
+
+
+//+------------------------------------------------------------------+
+//| Обновяване на всички бутони                                       |
+//+------------------------------------------------------------------+
+void RefreshAllButtons()
+{
+    // Първо изтриваме всички бутони за позиции (но не и служебните)
+    DeletePositionButtons();
+    
+    // След това създаваме нови за всички активни позиции
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket > 0 && PositionSelectByTicket(ticket))
+        {
+            double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+            ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            // Изчисляваме позицията според цената на отваряне
+            int startX = 20 + (i * 200); // Хоризонтално отместване
+            
+            // Конвертираме цената към Y координати на графиката
+            double priceRange = ChartGetDouble(0, CHART_PRICE_MAX) - ChartGetDouble(0, CHART_PRICE_MIN);
+            int chartHeight = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+            int startY = (int)((ChartGetDouble(0, CHART_PRICE_MAX) - openPrice) * chartHeight / priceRange);
+            
+            CreatePositionButtons(ticket, "POS", startX, startY, openPrice, posType);
+        }
+    }
+    
+    ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| Изтриване на бутоните за позиции                                  |
+//+------------------------------------------------------------------+
+void DeletePositionButtons()
+{
+    for(int i = ObjectsTotal(0, 0, OBJ_BUTTON) - 1; i >= 0; i--)
+    {
+        string objName = ObjectName(0, i, 0, OBJ_BUTTON);
+        // Проверяваме дали е бутон за позиция (не изтриваме Clear и Refresh)
+        if(StringFind(objName, g_prefix+"POS") >= 0)
+        {
+            ObjectDelete(0, objName);
+        }
+    }
+}
+
+
+
+//+------------------------------------------------------------------+
+//| Обработка на затваряне на позиция                                |
+//+------------------------------------------------------------------+
+void HandleClosePosition(string button)
+{
+    string base = StringSubstr(button, StringLen(g_prefix+"CL"));
+    ulong ticket = StringToInteger(StringSubstr(base, 3)); // Пропускаме "POS"
+    
+    if(PositionSelectByTicket(ticket))
+    {
+      //  CTrade trade;
+        trade.PositionClose(ticket);
+        Print("Position ", ticket, " closed");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Обработка на преместване на бутоните                             |
+//+------------------------------------------------------------------+
+
+
+
+
+//+------------------------------------------------------------------+
+//| Създаване на всички бутони за позиции                            |
+//+------------------------------------------------------------------+
+
+
+
+
+
+
+
+//--- Глобални променливи
+input int MagicNumber = 12345;    // Magic Number за ЕА
+string g_currentUser = "RexiBG";
+datetime g_startTime;
+string g_prefix = "RB_"; // Префикс за всички обекти
+
+
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                     |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    g_startTime = TimeCurrent();
+    
+     CreateMainButtons() ;
+
+    
+    Print("EA started: ", TimeToString(g_startTime, TIME_DATE|TIME_MINUTES|TIME_SECONDS));
+    Print("User: ", g_currentUser);
+    
+    // Създаваме служебните бутони
+    CreateServiceButtons();
+    
+    // Създаваме бутоните за всички съществуващи позиции
+    CreateAllPositionButtons();
+    
+    ChartRedraw();
+    return(INIT_SUCCEEDED);
+}
+
+
+//+------------------------------------------------------------------+
+//| Създаване на служебните бутони                                    |
+//+------------------------------------------------------------------+
+void CreateServiceButtons()
+{
+    Print("Creating service buttons");
+    CreateButton("Clear", 10, 10, 100, 20, "Clear Chart", 8);
+    CreateButton("Refresh", 120, 10, 100, 20, "Refresh All", 8);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                              |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+    static int lastPositionsTotal = 0;
+    static int lastOrdersTotal = 0;
+    int currentPositionsTotal = 0;
+    int currentOrdersTotal = 0;
+    
+    // Броим позициите и поръчките за текущия символ
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionGetTicket(i) > 0 && PositionGetString(POSITION_SYMBOL) == _Symbol)
+        {
+            currentPositionsTotal++;
+        }
+    }
+    
+    for(int i = 0; i < OrdersTotal(); i++)
+    {
+        if(OrderGetTicket(i) > 0 && OrderGetString(ORDER_SYMBOL) == _Symbol)
+        {
+            currentOrdersTotal++;
+        }
+    }
+    
+    if(currentPositionsTotal != lastPositionsTotal || currentOrdersTotal != lastOrdersTotal)
+    {
+        Print("Status changed for ", _Symbol, 
+              " Positions: ", lastPositionsTotal, "->", currentPositionsTotal,
+              " Orders: ", lastOrdersTotal, "->", currentOrdersTotal);
+              
+        DeleteAllButtons();
+        CreateServiceButtons();
+        CreateAllPositionButtons();
+        CreateAllPendingOrderButtons();
+        
+        lastPositionsTotal = currentPositionsTotal;
+        lastOrdersTotal = currentOrdersTotal;
+    }
+}
+
+
+
+//+------------------------------------------------------------------+
+//| Получаване на описание на типа поръчка                           |
+//+------------------------------------------------------------------+
+string GetOrderTypeDescription(ENUM_ORDER_TYPE orderType)
+{
+    switch(orderType)
+    {
+        case ORDER_TYPE_BUY_LIMIT: return "Buy Limit";
+        case ORDER_TYPE_SELL_LIMIT: return "Sell Limit";
+        case ORDER_TYPE_BUY_STOP: return "Buy Stop";
+        case ORDER_TYPE_SELL_STOP: return "Sell Stop";
+        default: return "Unknown";
+    }
+}
+
+
+
+//+------------------------------------------------------------------+
+//| Създаване на всички бутони за позиции                            |
+//+------------------------------------------------------------------+
+void CreateAllPositionButtons()
+{
+    int posCount = 0;
+    
+    // Вземаме размерите на графиката
+    int chart_height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+    double price_min = ChartGetDouble(0, CHART_PRICE_MIN);
+    double price_max = ChartGetDouble(0, CHART_PRICE_MAX);
+    
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        ulong ticket = PositionGetTicket(i);
+        if(ticket > 0 && PositionSelectByTicket(ticket))
+        {
+            string symbol = PositionGetString(POSITION_SYMBOL);
+            
+            if(symbol == _Symbol)
+            {
+                double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+                ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+                
+                string base = "POS" + IntegerToString(ticket);
+                int startX = 20 + (posCount * 200);
+                
+                // Изчисляваме Y позицията според цената
+                double priceRange = price_max - price_min;
+                int startY = (int)(chart_height * (price_max - openPrice) / priceRange);
+                
+                // Проверяваме за запазена X позиция
+                if(GlobalVariableCheck(g_prefix + "pos_" + base + "_x"))
+                {
+                    startX = (int)GlobalVariableGet(g_prefix + "pos_" + base + "_x");
+                }
+                
+                // Запазваме координатите
+                GlobalVariableSet(g_prefix + "pos_" + base + "_x", startX);
+                
+                // Създаваме бутоните с правилния префикс
+                CreateButton("Ctrl"+base, startX, startY, 30, 20, "< >", 8, true);
+                CreateButton("SL"+base, startX+35, startY, 25, 20, "SL", 8);
+                CreateButton("TP"+base, startX+65, startY, 25, 20, "TP", 8);
+                CreateButton("BE"+base, startX+95, startY, 25, 20, "BE", 8);
+                CreateButton("TR"+base, startX+125, startY, 25, 20, "TR", 8);
+                CreateButton("CL"+base, startX+155, startY, 25, 20, "X", 8);
+                
+                string posInfo = StringFormat("%s @ %s", 
+                                            (posType == POSITION_TYPE_BUY) ? "Buy" : "Sell",
+                                            DoubleToString(openPrice, _Digits));
+                CreateButton("Info"+base, startX, startY+20, 180, 20, posInfo, 8);
+                
+                posCount++;
+            }
+        }
+    }
+    ChartRedraw();
+}
+
+
+//+------------------------------------------------------------------+
+//| Обработка на местене на бутони                                    |
+//+------------------------------------------------------------------+
+void HandleButtonDrag(string button)
+{
+    string base = StringSubstr(button, StringLen(g_prefix+"Ctrl"));
+    int newX = (int)ObjectGetInteger(0, button, OBJPROP_XDISTANCE);
+    int currentY = (int)ObjectGetInteger(0, button, OBJPROP_YDISTANCE);
+    
+    // Запазваме само X позицията
+    if(StringFind(base, "ORD") == 0)
+    {
+        GlobalVariableSet("pos_" + base + "_x", newX);
+    }
+    else
+    {
+        GlobalVariableSet("pos_" + base + "_x", newX);
+    }
+    
+    // Връщаме Y позицията както е била и местим свързаните бутони
+    ObjectSetInteger(0, button, OBJPROP_YDISTANCE, currentY);
+    
+    string suffixes[] = {"SL", "TP", "BE", "TR", "CL", "Info"};
+    int xOffsets[] = {35, 65, 95, 125, 155, 0};
+    int yOffsets[] = {0, 0, 0, 0, 0, 20};
+    
+    for(int i = 0; i < ArraySize(suffixes); i++)
+    {
+        string objName = g_prefix + suffixes[i] + base;
+        if(ObjectFind(0, objName) >= 0)  // Проверяваме дали обектът съществува
+        {
+            ObjectSetInteger(0, objName, OBJPROP_XDISTANCE, newX + xOffsets[i]);
+            ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, currentY + yOffsets[i]);
+        }
+    }
+    
+    ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| Създаване на всички чакащи поръчки                               |
+//+------------------------------------------------------------------+
+void CreateAllPendingOrderButtons()
+{
+    int orderCount = 0;
+    
+    // Вземаме размерите на графиката
+    int chart_height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+    double price_min = ChartGetDouble(0, CHART_PRICE_MIN);
+    double price_max = ChartGetDouble(0, CHART_PRICE_MAX);
+    double priceRange = price_max - price_min;
+    
+    for(int i = 0; i < OrdersTotal(); i++)
+    {
+        ulong ticket = OrderGetTicket(i);
+        if(ticket > 0 && OrderSelect(ticket))
+        {
+            string symbol = OrderGetString(ORDER_SYMBOL);
+            
+            if(symbol == _Symbol)
+            {
+                double openPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+                ENUM_ORDER_TYPE orderType = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+                
+                string base = "ORD" + IntegerToString(ticket);
+                int startX = 20 + (orderCount * 200);
+                
+                // Изчисляваме Y позицията според цената на поръчката
+                int startY = (int)(chart_height * (price_max - openPrice) / priceRange);
+                
+                if(GlobalVariableCheck("pos_" + base + "_x"))
+                {
+                    startX = (int)GlobalVariableGet("pos_" + base + "_x");
+                }
+                
+                GlobalVariableSet("pos_" + base + "_x", startX);
+                
+                CreateButton("Ctrl"+base, startX, startY, 30, 20, "< >", 8, true);
+                CreateButton("SL"+base, startX+35, startY, 25, 20, "SL", 8);
+                CreateButton("TP"+base, startX+65, startY, 25, 20, "TP", 8);
+                CreateButton("CL"+base, startX+155, startY, 25, 20, "X", 8);
+                
+                string orderInfo = StringFormat("%s @ %s", 
+                    GetOrderTypeDescription(orderType),
+                    DoubleToString(openPrice, _Digits));
+                CreateButton("Info"+base, startX, startY+20, 180, 20, orderInfo, 8);
+                
+                orderCount++;
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+//+------------------------------------------------------------------+
+//| Обработка на местене на бутони                                    |
+//+------------------------------------------------------------------+
+void OnChartEvent(const int id,
+                  const long &lparam,
+                  const double &dparam,
+                  const string &sparam)
+{
+
+
+  Print("OnChartEvent triggered: id=", id, " sparam=", sparam);
+    
+    if(id == CHARTEVENT_OBJECT_CLICK)
+    {
+        Print("Button clicked: ", sparam);
+        
+        // Променяме имената да съвпадат с реалните
+        if(sparam == "RB_Clear") // било е g_prefix+"ClearChart"
+        {
+            Print("Clear button clicked - executing ClearChart()");
+            ClearChart();
+            ChartRedraw();
+            return;
+        }
+        
+        if(sparam == "RB_Refresh") // било е g_prefix+"RefreshAll"
+        {
+            Print("Refresh button clicked - executing RefreshAll()");
+            RefreshAll();
+            ChartRedraw();
+            return;
+        }
+      }  
+
+ if(id == CHARTEVENT_OBJECT_CLICK)
+    {
+        Print("Button clicked: ", sparam); // За дебъг
+        
+       
+        
+        // Обработка на Close бутона
+        if(StringFind(sparam, "RB_CL") == 0)
+        {
+            string baseStr = StringSubstr(sparam, StringLen("RB_CL"));
+            HandleCloseButton(baseStr);
+            return;
+        }
+    }
+
+
+
+ if(id == CHARTEVENT_OBJECT_CLICK)
+    {
+        if(sparam == g_prefix+"ClearChart")
+        {
+            ClearChart();
+            ChartRedraw();
+            return;
+        }
+        
+        if(sparam == g_prefix+"RefreshAll")
+        {
+            RefreshAll();
+            ChartRedraw();
+            return;
+        }
+    }
+
+
+// Добавете този case в съществуващия OnChartEvent
+if(id == CHARTEVENT_OBJECT_CLICK)
+{
+    if(StringFind(sparam, "RB_CL") == 0)
+    {
+        string baseStr = StringSubstr(sparam, StringLen("RB_CL"));
+        HandleCloseButton(baseStr);
+    }
+}
+
+
+    if(id == CHARTEVENT_OBJECT_DRAG)
+    {
+        string objName = sparam;
+        if(StringFind(objName, "RB_Ctrl") == 0)
+        {
+            string baseStr = StringSubstr(objName, StringLen("RB_Ctrl"));
+            
+            // Обработка на отворени позиции
+            if(StringSubstr(baseStr, 0, 3) == "POS")
+            {
+                string ticketStr = StringSubstr(baseStr, 3);
+                ulong ticket = StringToInteger(ticketStr);
+                
+                if(PositionSelectByTicket(ticket))
+                {
+                    double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+                    int correctY = PriceToY(openPrice);
+                    
+                    // Взимаме само X позицията
+                    int newX = (int)ObjectGetInteger(0, objName, OBJPROP_XDISTANCE);
+                    
+                    // Фиксираме Y позицията
+                    ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, correctY);
+                    
+                    // Обновяваме позицията в масива
+                    int index = FindButtonPosition(baseStr);
+                    if(index >= 0)
+                    {
+                        gButtonPositions[index].xPos = newX;
+                    }
+                    
+                    HandleButtonDrag(objName);
+                }
+            }
+            // Обработка на чакащи ордери
+            else if(StringSubstr(baseStr, 0, 3) == "ORD")
+            {
+                string ticketStr = StringSubstr(baseStr, 3);
+                ulong ticket = StringToInteger(ticketStr);
+                
+                if(OrderSelect(ticket))
+                {
+                    double openPrice = OrderGetDouble(ORDER_PRICE_OPEN);
+                    int correctY = PriceToY(openPrice);
+                    
+                    // Взимаме само X позицията
+                    int newX = (int)ObjectGetInteger(0, objName, OBJPROP_XDISTANCE);
+                    
+                    // Фиксираме Y позицията
+                    ObjectSetInteger(0, objName, OBJPROP_YDISTANCE, correctY);
+                    
+                    // Обновяваме позицията в масива
+                    int index = FindButtonPosition(baseStr);
+                    if(index >= 0)
+                    {
+                        gButtonPositions[index].xPos = newX;
+                    }
+                    
+                    HandleButtonDrag(objName);
+                }
+            }
+        }
+    }
+}
+
+
+//+------------------------------------------------------------------+
+//| Обработка на натискането на бутона за затваряне                  |
+//+------------------------------------------------------------------+
+void HandleCloseButton(string baseStr)
+{
+    // Проверяваме дали е отворена позиция (POS) или чакаща поръчка (ORD)
+    if(StringSubstr(baseStr, 0, 3) == "POS")
+    {
+        string ticketStr = StringSubstr(baseStr, 3);
+        ulong ticket = StringToInteger(ticketStr);
+        
+        if(PositionSelectByTicket(ticket))
+        {
+            trade.PositionClose(ticket);
+        }
+    }
+    else if(StringSubstr(baseStr, 0, 3) == "ORD")
+    {
+        string ticketStr = StringSubstr(baseStr, 3);
+        ulong ticket = StringToInteger(ticketStr);
+        
+        trade.OrderDelete(ticket); // Използваме trade.OrderDelete вместо OrderDelete
+    }
+}
+
+
+
+
+
+//+------------------------------------------------------------------+
+//| Изчисляване на X позиция спрямо текущия бар                       |
+//+------------------------------------------------------------------+
+int CalculateXPosition(ENUM_POSITION_TYPE type, int baseX)
+{
+    // Взимаме ширината на един бар
+    long barWidth;
+    ChartGetInteger(0, CHART_SCALE, 0, barWidth);
+    int shift = 5 * (int)barWidth; // 5 бара разстояние
+    
+    if(type == POSITION_TYPE_BUY)
+        return baseX + shift;
+    else
+        return baseX - shift;
+}
+
+
+int GetBarX()
+{
+    long firstVisibleBar;
+    long windowWidth;
+    long barsInWindow;
+    
+    ChartGetInteger(0, CHART_FIRST_VISIBLE_BAR, 0, firstVisibleBar);
+    ChartGetInteger(0, CHART_WIDTH_IN_PIXELS, 0, windowWidth);
+    ChartGetInteger(0, CHART_VISIBLE_BARS, 0, barsInWindow);
+    
+    if(barsInWindow <= 0) return (int)(windowWidth/2);
+    
+    int pixelsPerBar = (int)(windowWidth / barsInWindow);
+    int currentBarX = (int)(windowWidth/2);
+    
+    return currentBarX;
+}
+
+void RefreshPositions()
+{
+    // Изчистваме съществуващите бутони за позиции
+    ObjectsDeleteAll(0, g_prefix);
+    
+    // Обхождаме всички отворени позиции и създаваме бутони за тях
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelect(PositionGetSymbol(i)))
+        {
+            ulong ticket = PositionGetTicket(i);
+            double price = PositionGetDouble(POSITION_PRICE_OPEN);
+            ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            // Създаваме бутоните за позицията
+            CreatePositionButtons(ticket, "pos", 0, 40 + i * 45, price, type);
+        }
+    }
+    ChartRedraw();
+}
+
+bool CreateButton(string name, int x, int y, int width, int height, string text, int fontSize, bool dragable = false)
+{
+    ObjectCreate(0, g_prefix+name, OBJ_BUTTON, 0, 0, 0);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_XSIZE, width);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_YSIZE, height);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetString(0, g_prefix+name, OBJPROP_TEXT, text);
+    ObjectSetString(0, g_prefix+name, OBJPROP_FONT, "Arial");
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_FONTSIZE, fontSize);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_COLOR, clrBlack);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_BGCOLOR, clrWhite);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_SELECTABLE, dragable);
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_SELECTED, dragable);
+    //ObjectSetInteger(0, g_prefix+name, OBJPROP_MOVЕABLE, dragable);  // Добавяме това!
+    ObjectSetInteger(0, g_prefix+name, OBJPROP_BORDER_COLOR, clrBlack);
+    return true;
+}
+
+void CreatePositionButtons(ulong ticket, string prefix, int startX, int yPos, double price, ENUM_POSITION_TYPE type)
+{
+    string base = prefix + IntegerToString(ticket);
+    
+    // Проверяваме дали това е НОВА позиция
+    if(!GlobalVariableCheck("init_" + base))
+    {
+        // За нова позиция изчисляваме позицията спрямо текущия бар
+        int currentBarX = GetBarX();
+        
+        if(type == POSITION_TYPE_BUY)
+            startX = currentBarX + 200;  // Buy позиции вдясно от бара
+        else
+            startX = currentBarX - 400;  // Sell позиции вляво от бара
+            
+        GlobalVariableSet("pos_" + base + "_x", startX);
+        GlobalVariableSet("pos_" + base + "_y", yPos);
+        GlobalVariableSet("init_" + base, 1);
+    }
+    else
+    {
+        // За съществуваща позиция вземаме запазените координати
+        if(GlobalVariableCheck("pos_" + base + "_x"))
+            startX = (int)GlobalVariableGet("pos_" + base + "_x");
+        if(GlobalVariableCheck("pos_" + base + "_y"))
+            yPos = (int)GlobalVariableGet("pos_" + base + "_y");
+    }
+    
+    // Останалата част от кода остава същата
+    CreateButton("Ctrl"+base, startX, yPos, 30, 20, "< >", 8, true);
+    CreateButton("SL"+base, startX+35, yPos, 25, 20, "SL", 8);
+    CreateButton("TP"+base, startX+65, yPos, 25, 20, "TP", 8);
+    CreateButton("BE"+base, startX+95, yPos, 25, 20, "BE", 8);
+    CreateButton("TR"+base, startX+125, yPos, 25, 20, "TR", 8);
+    CreateButton("CL"+base, startX+155, yPos, 25, 20, "X", 8);
+    
+ //   string typeStr = (type == POSITION_TYPE_BUY) ? "Buy" : "Sell";
+  //  CreateButton("Info"+base, startX, yPos+20, 180, 20, 
+     //           typeStr + " @ " + DoubleToString(price, _Digits), 8);
+}
+
+
+// За създаването на бутоните:
+void CreateMainButtons()
+{
+    CreateButton("ClearChart", 10, 10, 80, 20, "Clear Chart", 8);
+    CreateButton("RefreshAll", 95, 10, 80, 20, "Refresh All", 8);
+}
+
+
+
+void ClearChart()
+{
+    Print("Starting ClearChart..."); // debug
+    
+    // Изтриване на всички обекти с префикса
+    int totalObjects = ObjectsTotal(0);
+    for(int i = totalObjects - 1; i >= 0; i--)
+    {
+        string objName = ObjectName(0, i);
+        if(StringFind(objName, g_prefix) == 0)
+        {
+            ObjectDelete(0, objName);
+            Print("Deleted object: ", objName); // debug
+        }
+    }
+    
+    // Изтриване на всички глобални променливи с префикса
+    int totalGlobals = GlobalVariablesTotal();
+    for(int i = totalGlobals - 1; i >= 0; i--)
+    {
+        string varName = GlobalVariableName(i);
+        if(StringFind(varName, g_prefix) == 0)
+        {
+            GlobalVariableDel(varName);
+            Print("Deleted global variable: ", varName); // debug
+        }
+    }
+    
+    ChartRedraw();
+    Print("ClearChart completed"); // debug
+}
+
+
+//+------------------------------------------------------------------+
+//| Създаване на основните бутони за управление                       |
+//+------------------------------------------------------------------+
+void CreateControlButtons()
+{
+    // Бутони за общо управление - в горната част на чарта
+    ObjectCreate(0, "RB_Clear", OBJ_BUTTON, 0, 0, 0);
+    ObjectSetInteger(0, "RB_Clear", OBJPROP_XDISTANCE, 10);
+    ObjectSetInteger(0, "RB_Clear", OBJPROP_YDISTANCE, 10);
+    ObjectSetInteger(0, "RB_Clear", OBJPROP_XSIZE, 80);
+    ObjectSetInteger(0, "RB_Clear", OBJPROP_YSIZE, 20);
+    ObjectSetString(0, "RB_Clear", OBJPROP_TEXT, "Clear");
+    
+    ObjectCreate(0, "RB_Refresh", OBJ_BUTTON, 0, 0, 0);
+    ObjectSetInteger(0, "RB_Refresh", OBJPROP_XDISTANCE, 95);
+    ObjectSetInteger(0, "RB_Refresh", OBJPROP_YDISTANCE, 10);
+    ObjectSetInteger(0, "RB_Refresh", OBJPROP_XSIZE, 80);
+    ObjectSetInteger(0, "RB_Refresh", OBJPROP_YSIZE, 20);
+    ObjectSetString(0, "RB_Refresh", OBJPROP_TEXT, "Refresh");
+}
+
+//+------------------------------------------------------------------+
+//| Обработка на събития за контролните бутони                        |
+//+------------------------------------------------------------------+
+void HandleControlButtons(string sparam)
+{
+    if(sparam == "RB_Clear")
+    {
+        Print("Clear button clicked");
+        ClearPositionButtons(); // Изчиства само бутоните за позиции
+        ChartRedraw();
+    }
+    else if(sparam == "RB_Refresh")
+    {
+        Print("Refresh button clicked");
+        RefreshPositionButtons(); // Опреснява само бутоните за позиции
+        ChartRedraw();
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Изчистване само на бутоните за позиции                           |
+//+------------------------------------------------------------------+
+void ClearPositionButtons()
+{
+    int total = ObjectsTotal(0);
+    for(int i = total - 1; i >= 0; i--)
+    {
+        string name = ObjectName(0, i);
+        // Проверява само за бутони свързани с позиции
+        if(StringFind(name, "RB_POS") == 0 || StringFind(name, "RB_Ctrl") == 0)
+        {
+            ObjectDelete(0, name);
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Опресняване само на бутоните за позиции                          |
+//+------------------------------------------------------------------+
+void RefreshPositionButtons()
+{
+    ClearPositionButtons();
+    
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            ulong ticket = PositionGetTicket(i);
+            double price = PositionGetDouble(POSITION_PRICE_OPEN);
+            ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            // Запазваме X позицията ако съществува, иначе създаваме нова
+            int xPos = type == POSITION_TYPE_BUY ? GetBarX() + 200 : GetBarX() - 400;
+            CreatePositionButtons(ticket, "pos", xPos, 40 + i * 45, price, type);
+        }
+    }
+}
+
+
+
+// Помощна функция за изчисляване на Y позицията според цената
+int GetYPositionForPrice(double price)
+{
+    int x = 0, y = 0;
+    if(!ChartTimePriceToXY(0, 0, TimeCurrent(), price, x, y))
+    {
+        Print("Error getting Y coordinate for price: ", price);
+        return 0;
+    }
+    return y;
+}
+
+
+// Функция за изтриване на всички бутони
+void DeleteAllButtons()
+{
+    int total = ObjectsTotal(0);
+    for(int i = total - 1; i >= 0; i--)
+    {
+        string name = ObjectName(0, i);
+        // Изтриваме всички обекти, които са наши бутони
+        if(StringFind(name, g_prefix) == 0)
+        {
+            Print("Deleting button: ", name);
+            ObjectDelete(0, name);
+        }
+    }
+    ChartRedraw();
+}
+
+
+void RefreshAll()
+{
+    Print("Starting RefreshAll for symbol: ", Symbol()); 
+    
+    // 1. Първо запазваме текущите позиции от GlobalVariables
+    // за всички активни бутони
+    struct SavedPosition
+    {
+        string base;
+        int x, y;
+    };
+    SavedPosition savedPositions[];
+    ArrayResize(savedPositions, 0);
+    
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            if(PositionGetString(POSITION_SYMBOL) != Symbol())
+                continue;
+                
+            string base = "pos" + IntegerToString(PositionGetTicket(i));
+            if(GlobalVariableCheck("pos_" + base + "_x") && GlobalVariableCheck("pos_" + base + "_y"))
+            {
+                int size = ArraySize(savedPositions);
+                ArrayResize(savedPositions, size + 1);
+                savedPositions[size].base = base;
+                savedPositions[size].x = (int)GlobalVariableGet("pos_" + base + "_x");
+                savedPositions[size].y = (int)GlobalVariableGet("pos_" + base + "_y");
+            }
+        }
+    }
+    
+    for(int i = 0; i < OrdersTotal(); i++)
+    {
+        if(OrderSelect(OrderGetTicket(i)))
+        {
+            if(OrderGetString(ORDER_SYMBOL) != Symbol())
+                continue;
+                
+            string base = "ord" + IntegerToString(OrderGetTicket(i));
+            if(GlobalVariableCheck("pos_" + base + "_x") && GlobalVariableCheck("pos_" + base + "_y"))
+            {
+                int size = ArraySize(savedPositions);
+                ArrayResize(savedPositions, size + 1);
+                savedPositions[size].base = base;
+                savedPositions[size].x = (int)GlobalVariableGet("pos_" + base + "_x");
+                savedPositions[size].y = (int)GlobalVariableGet("pos_" + base + "_y");
+            }
+        }
+    }
+    
+    // 2. Изтриваме всички бутони
+    DeleteAllButtons();
+    
+    // 3. Изчистваме масива с позиции
+    ArrayFree(gButtonPositions);
+    ArrayResize(gButtonPositions, 0);
+    
+    int chartWidth = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+    int sellXPos = 50;
+    int buyXPos = chartWidth - 150;
+    
+    // 4. Създаваме нови бутони за отворените позиции
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            if(PositionGetString(POSITION_SYMBOL) != Symbol())
+                continue;
+                
+            ulong ticket = PositionGetTicket(i);
+            double price = PositionGetDouble(POSITION_PRICE_OPEN);
+            ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+            
+            string base = "pos" + IntegerToString(ticket);
+            
+            // Проверяваме дали имаме запазена позиция
+            int xPos = (type == POSITION_TYPE_BUY) ? buyXPos : sellXPos;
+            int yPos = GetYPositionForPrice(price);
+            
+            // Търсим запазената позиция
+            for(int j = 0; j < ArraySize(savedPositions); j++)
+            {
+                if(savedPositions[j].base == base)
+                {
+                    xPos = savedPositions[j].x;
+                    yPos = savedPositions[j].y;
+                    // Възстановяваме GlobalVariables
+                    GlobalVariableSet("pos_" + base + "_x", xPos);
+                    GlobalVariableSet("pos_" + base + "_y", yPos);
+                    GlobalVariableSet("init_" + base, 1);
+                    break;
+                }
+            }
+            
+            CreatePositionButtons(ticket, "pos", xPos, yPos, price, type);
+            
+            // Добавяме в масива
+            int newSize = ArraySize(gButtonPositions);
+            ArrayResize(gButtonPositions, newSize + 1);
+            gButtonPositions[newSize].base = "POS" + IntegerToString(ticket);
+            gButtonPositions[newSize].xPos = xPos;
+            gButtonPositions[newSize].yPos = yPos;
+            gButtonPositions[newSize].isActive = true;
+        }
+    }
+    
+    // 5. Създаваме нови бутони за чакащите ордери
+    for(int i = 0; i < OrdersTotal(); i++)
+    {
+        if(OrderSelect(OrderGetTicket(i)))
+        {
+            if(OrderGetString(ORDER_SYMBOL) != Symbol())
+                continue;
+                
+            ulong ticket = OrderGetTicket(i);
+            double price = OrderGetDouble(ORDER_PRICE_OPEN);
+            ENUM_ORDER_TYPE orderType = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+            
+            string base = "ord" + IntegerToString(ticket);
+            
+            // Начална позиция според типа
+            int xPos = (orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP) ? buyXPos : sellXPos;
+            int yPos = GetYPositionForPrice(price);
+            
+            // Търсим запазената позиция
+            for(int j = 0; j < ArraySize(savedPositions); j++)
+            {
+                if(savedPositions[j].base == base)
+                {
+                    xPos = savedPositions[j].x;
+                    yPos = savedPositions[j].y;
+                    // Възстановяваме GlobalVariables
+                    GlobalVariableSet("pos_" + base + "_x", xPos);
+                    GlobalVariableSet("pos_" + base + "_y", yPos);
+                    GlobalVariableSet("init_" + base, 1);
+                    break;
+                }
+            }
+            
+            ENUM_POSITION_TYPE posType = (orderType == ORDER_TYPE_BUY_LIMIT || orderType == ORDER_TYPE_BUY_STOP) ? 
+                                        POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+            
+            CreatePositionButtons(ticket, "ord", xPos, yPos, price, posType);
+            
+            // Добавяме в масива
+            int newSize = ArraySize(gButtonPositions);
+            ArrayResize(gButtonPositions, newSize + 1);
+            gButtonPositions[newSize].base = "ORD" + IntegerToString(ticket);
+            gButtonPositions[newSize].xPos = xPos;
+            gButtonPositions[newSize].yPos = yPos;
+            gButtonPositions[newSize].isActive = true;
+        }
+    }
+    
+    ChartRedraw();
+    Print("RefreshAll completed for ", Symbol());
+}
+
+
+//+------------------------------------------------------------------+
+//| End of Expert Advisor                                             |
+//+------------------------------------------------------------------+
+
+
+
+
